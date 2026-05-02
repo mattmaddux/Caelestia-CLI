@@ -1,0 +1,53 @@
+version: '3'
+
+vars:
+  IMAGE: caelestia-cli-build:latest
+  REPO: '{{.TASKFILE_DIR}}'
+  DIST: '{{.TASKFILE_DIR}}/dist'
+  USER_FISH_COMP: '{{.HOME}}/.config/fish/completions'
+  DOCKER_RUN: docker run --rm -v {{.REPO}}:/workspace -u $(id -u):$(id -g) -w /workspace {{.IMAGE}}
+
+tasks:
+  image:
+    desc: Build the Arch build-image (rebuilds only when Dockerfile changes)
+    sources:
+      - Dockerfile
+    cmds:
+      - docker build -t {{.IMAGE}} {{.REPO}}
+
+  build:
+    desc: Build the wheel into dist/ via the build container
+    deps: [image]
+    cmds:
+      - rm -rf {{.DIST}}
+      - |
+        {{.DOCKER_RUN}} bash -c '
+          set -e
+          python -m build --wheel --no-isolation --outdir dist
+        '
+
+  install:
+    desc: Install the wheel via pipx and drop fish completions into the user dir
+    deps: [build]
+    cmds:
+      - pipx install --force {{.DIST}}/caelestia-*.whl
+      - mkdir -p {{.USER_FISH_COMP}}
+      - cp {{.REPO}}/completions/caelestia.fish {{.USER_FISH_COMP}}/caelestia.fish
+
+  uninstall:
+    desc: Remove the user-local install (pipx + fish completions). Does NOT touch the AUR package.
+    cmds:
+      - pipx uninstall caelestia || true
+      - rm -f {{.USER_FISH_COMP}}/caelestia.fish
+
+  clean:
+    desc: Remove dist/ and any build artefacts
+    cmds:
+      - rm -rf {{.TASKFILE_DIR}}/dist {{.TASKFILE_DIR}}/build
+
+  shell:
+    desc: Drop into a shell inside the build container
+    deps: [image]
+    interactive: true
+    cmds:
+      - docker run --rm -it -v {{.REPO}}:/workspace -u $(id -u):$(id -g) -w /workspace {{.IMAGE}}
